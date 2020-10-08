@@ -1,3 +1,5 @@
+require('dotenv')
+
 const express = require('express')
 const app = express()
 const bodyParser = require('body-parser')
@@ -5,6 +7,7 @@ const bodyParser = require('body-parser')
 const cors = require('cors')
 
 const mongoose = require('mongoose')
+const { Db } = require('mongodb')
 mongoose.connect(process.env.MLAB_URI || 'mongodb://localhost/exercise-track' )
 
 app.use(cors())
@@ -14,10 +17,199 @@ app.use(bodyParser.json())
 
 
 app.use(express.static('public'))
+
+
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html')
 });
 
+const exercise = {
+  description: String,
+  duration: Number,
+  date: { type: Date, default: Date.now}
+};
+
+const trackerSchema = new mongoose.Schema({
+  username: String,
+  exercises: [exercise] 
+});
+
+var Tracker = mongoose.model("Tracker", mongoose.Schema.trackerSchema);
+
+function throw_promise_error(error){
+  return new Promise((resolve, reject)=>{
+    reject(error);
+  })
+}
+
+function saveNewUser(username){
+  return new Promise((resolve, reject)=>{
+    const user = new mongoose.model.Tracker({username: username});
+    user.save((err, doc)=>{
+      if(err) return reject(err);
+      return resolve(doc);
+    })    
+  })
+}
+
+function checkUsername(username){
+  return new Promise((resolve, reject)=>{
+    mongoose.models.Tracker.findOne({username: username}, (err, doc)=>{
+      if(err) return reject(err);
+      else if (doc === null) return ({ status: true});
+      else return ({status: false});
+    })
+  })
+}
+
+function saveExercise(userId, exercise){
+  return new Promise((resolve, reject)=>{
+    if(userId.length!=24){
+      reject("unknown");
+    } else mongoose.models.Tracker.findByIdAndUpdate(
+      userId,
+      { $push: { exercises: exercise }},
+      {new : true},
+      (err, doc)=>{
+        if(err){
+          reject(err.reason.message);
+        } else if (doc === null) reject("unknown_id");
+        else resolve(doc);
+      });
+  })
+}
+
+function formatOutput(doc, limit, to, from){
+  var output = { _id: doc._id, username: doc.username};
+  var logs = docs.exercises.slice();
+  var filteredLogs =[];
+  for (var i in logs){
+    var date = new Date(logs[i].date);
+    var log = {
+      description: logs[i].description,
+      duration: logs[i].duration,
+      date: logs[i].toDateString()
+    };
+    if(typeof from !== "undefined"){
+      output.from = from;
+    } 
+    if(typeof to !== "undefined"){
+      output.to = to;
+    }
+    if(
+      (typeof to === "undefined" && typeof from === "undefined") ||
+      (typeof to !== "undefined" && 
+      new Date(to)> date &&
+      typeof from == "undefined") ||
+      (typeof from !== "undefined" &&
+      new Date(from) < date &&
+      typeof to === "undefined") ||
+      (typeof from !== "unedfined" &&
+      new Date(from) < date &&
+      typeof to !== "undefined" &&
+      new Date(to) > date)
+    ){
+      filteredLogs.push(log);
+    }
+    console.log(i);
+  }
+  console.log(logs);
+  if(typeof limit!== "undefined") filteredLogs = filteredLogs.slice(0, limit);
+  output.count = filteredLogs.length;
+  output.log = filteredLogs;
+  return output;
+}
+
+app.post('/api/exercise/new-user', (req, res, next) =>{
+  const username = req.body.username;
+  if(username === null){
+    return res.send("Username cannot be empty");
+  }  else next();
+},
+function(req, res){
+  const username = req.body.username;
+  var promise = checkUsername(username);
+  promise.then(function(data){
+    if(data.status) return saveNewUser(username);
+    else return throw_promise_error("username unavailable");
+  })
+  .then(function(data){
+    return res.json({username: data.username, _id:data._id});
+  })
+  .catch(function(err){
+    return res.send(err); 
+  })
+});
+
+app.get('/api/exercise/users', (req, res) =>{
+  Db.collection.find()
+  .then((data)=>{
+  const users = [];
+  data.forEach((doc)=>{
+    users.push({
+      username: doc.data().username,
+      _id: doc._id
+    })  
+  })
+  return res.json({users});
+})
+.catch((err)=>{
+  return res.send(err);
+})
+});
+
+app.post('/api/exercise/add', (req, res, next) =>{
+  var params =req.body;
+  var notFound = [];
+  if(params._id === null){
+    notFound.push(`${params._id}`);
+  }
+  if(params.description === null){
+    notFound.push("description");
+  }
+  if(params.duration === null){
+    notFound.push("duration");
+  }
+  if(params.date === null){
+    req.body.date = new Date();
+  }
+
+  if(notFound.length > 0) return res.send(notFound.toString() + "required!");
+  else next();
+},
+function(req, res){
+  var exercise = {
+    description : req.body.description,
+    duration: req.body.duration,
+    date: req.body.date
+  };
+  var promise = saveExercise(req.body._id, exercise);
+  promise.then((data)=>{
+    return res.json(
+      Object.assign({ username: data.username, _id: data._id}, exercise)
+    );  
+  })
+  .catch((err)=>{
+    return res.json(err);
+  })
+});
+
+app.get('/api/exercise/log', (req, res) =>{
+  var promise = getUserDetails(req.query._id);
+  promise.then((data)=>{
+    return res.json(
+      formatOutput(
+        data,
+        req.query.limit,
+        req.query.to,
+        req.query.from
+      )
+    );
+  })
+  .catch((err)=>{
+    return res.json(err);
+  })
+});
 
 // Not found middleware
 app.use((req, res, next) => {

@@ -1,4 +1,6 @@
-require('dotenv')
+'use-strict';
+
+require('dotenv');
 
 const express = require('express')
 const app = express()
@@ -8,7 +10,7 @@ const cors = require('cors')
 
 const mongoose = require('mongoose')
 const { Db } = require('mongodb')
-mongoose.connect(process.env.MLAB_URI || 'mongodb://localhost/exercise-track' )
+mongoose.connect(process.env.MLAB_URI, { useUnifiedTopology: true, useNewUrlParser: true } || 'mongodb://localhost/exercise-track' )
 
 app.use(cors())
 
@@ -23,18 +25,18 @@ app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html')
 });
 
-const exercise = {
+var exercise = {
   description: String,
   duration: Number,
   date: { type: Date, default: Date.now}
 };
 
-const trackerSchema = new mongoose.Schema({
+var trackerSchema = new mongoose.Schema({
   username: String,
   exercises: [exercise] 
 });
 
-var Tracker = mongoose.model("Tracker", mongoose.Schema.trackerSchema);
+var Tracker = mongoose.model("Tracker", trackerSchema);
 
 function throw_promise_error(error){
   return new Promise((resolve, reject)=>{
@@ -44,7 +46,7 @@ function throw_promise_error(error){
 
 function saveNewUser(username){
   return new Promise((resolve, reject)=>{
-    const user = new mongoose.model.Tracker({username: username});
+    const user = Tracker({username: username});
     user.save((err, doc)=>{
       if(err) return reject(err);
       return resolve(doc);
@@ -54,7 +56,7 @@ function saveNewUser(username){
 
 function checkUsername(username){
   return new Promise((resolve, reject)=>{
-    mongoose.models.Tracker.findOne({username: username}, (err, doc)=>{
+    Tracker.findOne({username: username}, (err, doc)=>{
       if(err) return reject(err);
       else if (doc === null) return ({ status: true});
       else return ({status: false});
@@ -66,7 +68,7 @@ function saveExercise(userId, exercise){
   return new Promise((resolve, reject)=>{
     if(userId.length!=24){
       reject("unknown");
-    } else mongoose.models.Tracker.findByIdAndUpdate(
+    } else Tracker.findByIdAndUpdate(
       userId,
       { $push: { exercises: exercise }},
       {new : true},
@@ -76,6 +78,16 @@ function saveExercise(userId, exercise){
         } else if (doc === null) reject("unknown_id");
         else resolve(doc);
       });
+  })
+}
+
+function getUserDetails(userId){
+  return new Promise((resolve, reject)=>{
+    var query = {_id: userId};
+    Tracker.findOne(query, (err, doc)=>{
+      if(err) reject(err);
+      else resolve(doc);
+    })
   })
 }
 
@@ -136,7 +148,7 @@ function(req, res){
   .then(function(data){
     return res.json({username: data.username, _id:data._id});
   })
-  .catch(function(err){
+  .catch((err)=>{
     return res.send(err); 
   })
 });
@@ -161,29 +173,29 @@ app.get('/api/exercise/users', (req, res) =>{
 app.post('/api/exercise/add', (req, res, next) =>{
   var params =req.body;
   var notFound = [];
-  if(params._id === null){
-    notFound.push(`${params._id}`);
+  if(params.userId === ""){
+    notFound.push("`userId`");
   }
-  if(params.description === null){
-    notFound.push("description");
+  if(params.description === ""){
+    notFound.push("`description`");
   }
-  if(params.duration === null){
-    notFound.push("duration");
+  if(params.duration === ""){
+    notFound.push("`duration`");
   }
-  if(params.date === null){
+  if(params.date === ""){
     req.body.date = new Date();
   }
 
   if(notFound.length > 0) return res.send(notFound.toString() + "required!");
   else next();
 },
-function(req, res){
+(req, res)=> {
   var exercise = {
     description : req.body.description,
     duration: req.body.duration,
     date: req.body.date
   };
-  var promise = saveExercise(req.body._id, exercise);
+  var promise = saveExercise(req.body.userId, exercise);
   promise.then((data)=>{
     return res.json(
       Object.assign({ username: data.username, _id: data._id}, exercise)
@@ -195,7 +207,7 @@ function(req, res){
 });
 
 app.get('/api/exercise/log', (req, res) =>{
-  var promise = getUserDetails(req.query._id);
+  var promise = getUserDetails(req.query.userId);
   promise.then((data)=>{
     return res.json(
       formatOutput(
